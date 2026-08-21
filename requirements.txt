@@ -5,7 +5,9 @@ python-multipart>=0.0.9
 requests>=2.31.0
 pydantic>=2.7.0
 
-# Image & Computer Vision
+# Image & AI Background Removal
+rembg>=2.0.55
+onnxruntime>=1.17.0
 pillow>=10.2.0
 numpy>=1.24.0
 opencv-python-headless>=4.9.0.80
