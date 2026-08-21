@@ -1,96 +1,48 @@
-# Video2Doc MultiLang v1.0
-
-CPU対応・PWA型 多言語現場マニュアル自動生成SaaS & AI処理パイプライン。
+# Remove - 漫画コマ キャラクター個別分離＆アニメ連携パイプライン
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
-[![Deploy on Fly.io](https://fly.io/badge.svg)](https://fly.io)
 
-現場で撮影した作業動画から音声認識・重要場面抽出・視覚解析を行い、動画内の客観的な根拠（Evidence）を紐付けた構造化データ（`manual_master.json`）を生成し、多言語翻訳（ベトナム語・インドネシア語等）および HTML / Markdown / PDF 出力を行います。
-
----
-
-## 開発方針 & アーキテクチャ
-
-1. **CPU完全対応**:
-   GPUを前提とせず、CPU最適化（`faster-whisper` int8, `llama.cpp` GGUF Q4, `CTranslate2` M2M100）で動作。
-2. **Evidence-First**:
-   AIによる根拠のない補完を禁止。すべての手順は動画タイムライン、音声セグメント（`transcript_ids`）、キーフレーム（`frame_ids`）を厳格に保持。
-3. **段階的構築 (CLI First)**:
-   CLI Engine → API (FastAPI) → Worker (Celery/Redis) → Database (PostgreSQL) → PWA (React+Vite)。
+漫画の1コマ画像から、複数キャラクター（例: 五条、花御など）をピンポイントで個別に切り抜き、アルファ透過PNG化・裏側背景の穴埋め補完（Clean Plate）・アニメーションツール（Cartoon Animator 5 / After Effects / Spine 2D）連携用マニフェストを一括生成するWeb/CLIツールです。
 
 ---
 
-## リポジトリ構成
-
-```text
-video2doc-multilang/
-├ worker/
-│  ├ pipeline/          # 各パイプライン処理 (validation, audio, transcription, scenes, frames, vision, evidence, segmentation, manual, translation, rendering)
-│  ├ providers/         # 抽象化プロバイダー (transcription, vision, translation, storage)
-│  └ schemas/           # Pydanticデータモデル (transcript, scene, frames, vision, evidence, manual, glossary)
-├ templates/            # Jinja2 テンプレート (HTML, Markdown)
-├ scripts/
-│  ├ run_pipeline.py    # CLI E2E エントリーポイント
-│  ├ setup_models.py    # モデルセットアップ補助
-│  └ generate_sample_media.py # テスト用サンプル動画生成
-├ fixtures/sample/      # サンプルメディア
-└ tests/                # 単体・統合テスト
-```
+## 🎯 主な機能
+1. **Promptable / Bounding Box によるキャラ別高精度切り抜き**:
+   - 全体背景透過（Rembg等）では不可能な「同じコマ内の五条だけ / 花御だけ」を個別指定して分離。
+2. **背景クリーンプレート（Clean Plate）自動生成**:
+   - キャラを切り抜いた後の背後背景をインペインティング（Inpainting）で自動穴埋め補完。
+3. **アニメーションツール連携 (CTA5 / AE / Spine)**:
+   - 透過レイヤー構造および座標情報マニフェスト（JSON）を自動出力。
+4. **直感的な Web UI ＆ 即座に試せる Fast Demo**:
+   - ブラウザ上でマウスドラッグしてキャラを囲むだけの簡単操作。
 
 ---
 
-## クイックスタート
+## 🚀 クイックスタート
 
-### 🚀 最速起動: Docker Compose（推奨・環境構築不要）
+### 1. Docker Compose（推奨・ワンコマンド起動）
 ```bash
-# ワンコマンドでWebサーバーとUIを起動
 docker compose up --build
 ```
-起動後、ブラウザで **`http://localhost:8000`** にアクセスすると、直感的なWeb画面から動画を投入して多言語マニュアルを生成できます。
+ブラウザで `http://localhost:8000` を開く。
 
----
-
-### 💻 ローカル直接起動 (FastAPI Web UI)
+### 2. ローカル直接起動 (FastAPI Web UI)
 ```bash
-# 依存ライブラリのインストール
 pip install -r requirements.txt
-
-# Webサーバーの起動
 uvicorn apps.api.main:app --reload --port 8000
 ```
-ブラウザで **`http://localhost:8000`** にアクセス。
+ブラウザで `http://localhost:8000` を開く。
+
+### 3. CLI バッチ実行
+```bash
+python scripts/extract_characters.py \
+  --image panel.jpg \
+  --chars "gojo:50,50,350,550;hanami:450,50,750,550" \
+  --output output/
+```
 
 ---
 
-### ⌨️ CLI でのバッチ実行
-
-### 2. テストの実行
-```bash
-pytest tests/
-```
-
-### 3. サンプル動画によるパイプライン実行 (CLI)
-```bash
-# サンプル動画の生成
-python scripts/generate_sample_media.py
-
-# パイプライン実行 (MP4 -> Evidence -> manual_master.json -> 翻訳 -> HTML/MD/PDF)
-python scripts/run_pipeline.py \
-  --input fixtures/sample/sample.mp4 \
-  --source-language ja \
-  --target-languages vi,id \
-  --output ./output \
-  --use-mock
-```
-
-出力先 `./output/` に以下の成果物が生成されます:
-- `audio.wav` : 抽出された 16kHz mono 音声
-- `frames/*.jpg` : 重複排除されたキーフレーム画像
-- `transcript.json` : Whisper 音声認識結果
-- `scenes.json` : シーン境界データ
-- `frames.json` : キーフレームメタデータ
-- `vision.json` : 各フレームの視覚解析結果
-- `evidence.json` : 音声・映像を統合した根拠データ
-- `manual_master.json` : **システムの正規マニュアルデータ**
-- `manual_vi.json`, `manual_id.json` : 翻訳済みマニュアル
-- `manual.html`, `manual.md`, `manual.pdf` : レンダリング済みドキュメント
+## 📖 ガイドドキュメント
+- [`docs/workflows/gui_animation_guide.md`](docs/workflows/gui_animation_guide.md): Cartoon Animator 5 / After Effects (Puppet Tool) / Spine への素材取り込み・アニメ化手順
+- [`docs/workflows/manga_separation_guide.md`](docs/workflows/manga_separation_guide.md): 漫画特有の線画・トーン・集中線・吹き出し除去の実践ノウハウ

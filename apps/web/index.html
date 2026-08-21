@@ -1,26 +1,358 @@
 <!DOCTYPE html>
 <html lang="ja">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#2563eb" />
-    <meta name="description" content="Video2Doc MultiLang - 現場作業動画から多言語マニュアルを自動生成するPWA" />
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <title>Video2Doc MultiLang</title>
-    <style>
-      * { box-sizing: border-box; }
-      body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f8fafc; color: #0f172a; }
-    </style>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js').catch(console.error);
-        });
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Remove - 漫画コマ キャラクター個別分離＆アニメ連携</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+  <!-- Header -->
+  <header class="bg-slate-800 border-b border-slate-700 sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="bg-violet-600 text-white p-2.5 rounded-xl font-bold">
+          <i class="fa-solid fa-wand-magic-sparkles text-xl"></i>
+        </div>
+        <div>
+          <h1 class="font-bold text-lg leading-tight flex items-center gap-2">
+            <span>Remove</span>
+            <span class="text-xs bg-violet-900 text-violet-300 px-2 py-0.5 rounded-full font-mono">SAM 2 + Inpaint</span>
+          </h1>
+          <p class="text-xs text-slate-400">漫画1コマから複数キャラ（五条・花御等）を個別切り抜き＆アニメ連携</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800">
+          <span class="w-2 h-2 mr-1.5 bg-emerald-400 rounded-full animate-ping"></span>
+          Ready for CTA5 / AE / Spine
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="max-w-7xl mx-auto px-4 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+    
+    <!-- Left: Input & Canvas Selection -->
+    <div class="lg:col-span-6 space-y-6">
+      <div class="bg-slate-800 p-6 rounded-2xl border border-slate-700 space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="font-bold text-base text-slate-200 flex items-center gap-2">
+            <i class="fa-solid fa-image text-violet-400"></i>
+            1. コマ画像の投入
+          </h2>
+          <button type="button" id="btnDemo" class="text-xs py-1.5 px-3 bg-violet-600 hover:bg-violet-500 text-white font-bold rounded-lg transition flex items-center gap-1.5">
+            <i class="fa-solid fa-bolt"></i>
+            五条 & 花御 サンプルで即試す
+          </button>
+        </div>
+
+        <div id="dropZone" class="border-2 border-dashed border-slate-600 hover:border-violet-500 rounded-xl p-6 text-center cursor-pointer transition-colors bg-slate-850/50">
+          <input type="file" id="imageInput" accept="image/*" class="hidden">
+          <i class="fa-solid fa-cloud-arrow-up text-3xl text-slate-400 mb-2"></i>
+          <p class="text-sm font-medium text-slate-300" id="fileLabel">コマ画像をドラッグ＆ドロップ または クリックして選択</p>
+          <p class="text-xs text-slate-500 mt-1">JPG, PNG, WebP 対応</p>
+        </div>
+
+        <!-- Image / Canvas Area -->
+        <div id="canvasContainer" class="hidden relative border border-slate-700 rounded-xl overflow-hidden bg-black flex justify-center">
+          <canvas id="mangaCanvas" class="max-w-full max-h-[450px] cursor-crosshair"></canvas>
+        </div>
+
+        <!-- Target Character List -->
+        <div id="targetListSection" class="space-y-3">
+          <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">抽出対象キャラクター</h3>
+          <div id="characterTags" class="flex flex-wrap gap-2">
+            <span class="text-xs text-slate-500 italic" id="emptyTagNotice">画像上でドラッグしてキャラ領域を指定してください</span>
+          </div>
+
+          <div class="flex items-center gap-2 pt-2">
+            <input type="text" id="charNameInput" placeholder="キャラ名 (例: gojo, hanami)" class="flex-1 bg-slate-900 border border-slate-700 text-sm rounded-lg px-3 py-2 text-slate-200">
+            <button type="button" id="btnAddChar" class="py-2 px-4 bg-slate-700 hover:bg-slate-600 text-sm font-semibold rounded-lg transition">
+              追加
+            </button>
+          </div>
+        </div>
+
+        <!-- Submit Button -->
+        <button type="button" id="btnExtract" class="w-full py-3 px-4 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-bold rounded-xl shadow-lg transition flex items-center justify-center gap-2">
+          <i class="fa-solid fa-scissors"></i>
+          個別キャラクター切り抜き ＆ 透過素材化を実行
+        </button>
+      </div>
+    </div>
+
+    <!-- Right: Output & Layer Preview -->
+    <div class="lg:col-span-6 space-y-6">
+      <div class="bg-slate-800 p-6 rounded-2xl border border-slate-700 min-h-[500px]">
+        <div class="flex items-center justify-between border-b border-slate-700 pb-4 mb-4">
+          <div>
+            <h2 class="font-bold text-base text-slate-200 flex items-center gap-2">
+              <i class="fa-solid fa-layer-group text-violet-400"></i>
+              2. 透過レイヤー＆アニメ連携出力
+            </h2>
+            <p class="text-xs text-slate-400">各キャラの透過PNGと、キャラ裏側の補完背景（Clean Plate）</p>
+          </div>
+
+          <div id="downloadGroup" class="hidden flex items-center gap-2">
+            <a id="btnManifest" href="#" target="_blank" class="px-3 py-1.5 bg-violet-900 hover:bg-violet-800 text-violet-200 rounded-lg text-xs font-semibold flex items-center gap-1 transition">
+              <i class="fa-solid fa-code"></i> Manifest (JSON)
+            </a>
+          </div>
+        </div>
+
+        <!-- Placeholder -->
+        <div id="resultPlaceholder" class="flex flex-col items-center justify-center py-24 text-slate-500">
+          <i class="fa-regular fa-images text-5xl mb-3 text-slate-600"></i>
+          <p class="text-sm font-medium">左側で画像を投入して切り抜きを実行してください</p>
+          <p class="text-xs text-slate-600 mt-1">「五条 & 花御 サンプルで即試す」ですぐにデモを実行できます</p>
+        </div>
+
+        <!-- Result Content -->
+        <div id="resultContent" class="hidden space-y-6">
+          <!-- Clean Background -->
+          <div class="bg-slate-900/60 p-4 rounded-xl border border-slate-700/60 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <i class="fa-solid fa-image text-indigo-400"></i> 補完背景 (Clean Plate)
+              </span>
+              <a id="linkBg" href="#" download class="text-xs text-violet-400 hover:underline">PNG保存</a>
+            </div>
+            <div class="h-44 bg-slate-950 rounded-lg flex items-center justify-center overflow-hidden border border-slate-800">
+              <img id="imgCleanBg" class="max-h-full object-contain">
+            </div>
+          </div>
+
+          <!-- Characters Grid -->
+          <div class="space-y-2">
+            <h3 class="text-xs font-bold text-slate-300">切り抜きキャラクター (透過PNG)</h3>
+            <div id="charResultsGrid" class="grid grid-cols-2 gap-3"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const dropZone = document.getElementById('dropZone');
+    const imageInput = document.getElementById('imageInput');
+    const fileLabel = document.getElementById('fileLabel');
+    const btnDemo = document.getElementById('btnDemo');
+    const btnExtract = document.getElementById('btnExtract');
+    const btnAddChar = document.getElementById('btnAddChar');
+    const charNameInput = document.getElementById('charNameInput');
+    const characterTags = document.getElementById('characterTags');
+    const emptyTagNotice = document.getElementById('emptyTagNotice');
+    const canvasContainer = document.getElementById('canvasContainer');
+    const canvas = document.getElementById('mangaCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const resultPlaceholder = document.getElementById('resultPlaceholder');
+    const resultContent = document.getElementById('resultContent');
+    const downloadGroup = document.getElementById('downloadGroup');
+    const imgCleanBg = document.getElementById('imgCleanBg');
+    const linkBg = document.getElementById('linkBg');
+    const charResultsGrid = document.getElementById('charResultsGrid');
+    const btnManifest = document.getElementById('btnManifest');
+
+    let currentImageId = null;
+    let loadedImg = null;
+    let targets = [];
+    let isDrawing = false;
+    let startX = 0, startY = 0;
+    let currentBox = null;
+
+    dropZone.addEventListener('click', () => imageInput.click());
+    imageInput.addEventListener('change', async (e) => {
+      if (e.target.files.length > 0) {
+        const file = e.target.files[0];
+        fileLabel.innerText = file.name;
+        await uploadImageFile(file);
       }
-    </script>
-  </body>
+    });
+
+    async function uploadImageFile(file) {
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        const res = await fetch('/api/upload', { method: 'POST', body: formData });
+        const data = await res.json();
+        currentImageId = data.image_id;
+        loadImageToCanvas(data.url);
+      } catch (err) {
+        alert('アップロード失敗: ' + err.message);
+      }
+    }
+
+    function loadImageToCanvas(url) {
+      loadedImg = new Image();
+      loadedImg.onload = () => {
+        canvas.width = loadedImg.width;
+        canvas.height = loadedImg.height;
+        canvasContainer.classList.remove('hidden');
+        redrawCanvas();
+      };
+      loadedImg.src = url;
+    }
+
+    function redrawCanvas() {
+      if (!loadedImg) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(loadedImg, 0, 0);
+
+      // Draw registered targets
+      targets.forEach(t => {
+        if (t.box) {
+          ctx.strokeStyle = '#8b5cf6';
+          ctx.lineWidth = 3;
+          ctx.strokeRect(t.box[0], t.box[1], t.box[2] - t.box[0], t.box[3] - t.box[1]);
+          ctx.fillStyle = '#8b5cf6';
+          ctx.font = 'bold 14px sans-serif';
+          ctx.fillText(t.name, t.box[0] + 5, t.box[1] + 18);
+        }
+      });
+
+      // Draw current dragging box
+      if (currentBox) {
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 6]);
+        ctx.strokeRect(currentBox[0], currentBox[1], currentBox[2] - currentBox[0], currentBox[3] - currentBox[1]);
+        ctx.setLineDash([]);
+      }
+    }
+
+    canvas.addEventListener('mousedown', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      startX = (e.clientX - rect.left) * scaleX;
+      startY = (e.clientY - rect.top) * scaleY;
+      isDrawing = true;
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!isDrawing) return;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const curX = (e.clientX - rect.left) * scaleX;
+      const curY = (e.clientY - rect.top) * scaleY;
+      currentBox = [
+        Math.min(startX, curX),
+        Math.min(startY, curY),
+        Math.max(startX, curX),
+        Math.max(startY, curY)
+      ];
+      redrawCanvas();
+    });
+
+    canvas.addEventListener('mouseup', () => {
+      if (isDrawing && currentBox) {
+        isDrawing = false;
+        charNameInput.focus();
+      }
+    });
+
+    btnAddChar.addEventListener('click', () => {
+      const name = charNameInput.value.trim() || `char_${targets.length + 1}`;
+      if (currentBox) {
+        targets.push({ name: name, box: currentBox.map(Math.round) });
+        currentBox = null;
+        charNameInput.value = '';
+        renderTags();
+        redrawCanvas();
+      } else {
+        alert('キャンバス上でドラッグして範囲を指定してください');
+      }
+    });
+
+    function renderTags() {
+      if (targets.length === 0) {
+        emptyTagNotice.classList.remove('hidden');
+        return;
+      }
+      emptyTagNotice.classList.add('hidden');
+      characterTags.innerHTML = '';
+      targets.forEach((t, idx) => {
+        const badge = document.createElement('span');
+        badge.className = 'px-2.5 py-1 bg-violet-900/80 text-violet-200 border border-violet-700 rounded-lg text-xs font-semibold flex items-center gap-1.5';
+        badge.innerHTML = `<span>${t.name}</span><button onclick="removeTarget(${idx})" class="text-violet-400 hover:text-white">&times;</button>`;
+        characterTags.appendChild(badge);
+      });
+    }
+
+    window.removeTarget = function(idx) {
+      targets.splice(idx, 1);
+      renderTags();
+      redrawCanvas();
+    };
+
+    btnExtract.addEventListener('click', async () => {
+      if (!currentImageId || targets.length === 0) {
+        alert('画像と1人以上のキャラクター領域を指定してください');
+        return;
+      }
+      try {
+        const res = await fetch('/api/extract', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image_id: currentImageId,
+            characters: targets,
+            generate_bg: true
+          })
+        });
+        const data = await res.json();
+        showResults(data);
+      } catch (err) {
+        alert('抽出失敗: ' + err.message);
+      }
+    });
+
+    btnDemo.addEventListener('click', async () => {
+      try {
+        btnDemo.innerHTML = '<i class="fa-solid fa-spinner animate-spin"></i> 生成中...';
+        const res = await fetch('/api/demo', { method: 'POST' });
+        const data = await res.json();
+        showResults(data);
+        btnDemo.innerHTML = '<i class="fa-solid fa-bolt"></i> 五条 & 花御 サンプルで即試す';
+      } catch (err) {
+        alert('デモ失敗: ' + err.message);
+        btnDemo.innerHTML = '<i class="fa-solid fa-bolt"></i> 五条 & 花御 サンプルで即試す';
+      }
+    });
+
+    function showResults(data) {
+      resultPlaceholder.classList.add('hidden');
+      resultContent.classList.remove('hidden');
+      downloadGroup.classList.remove('hidden');
+
+      if (data.clean_background) {
+        imgCleanBg.src = data.clean_background;
+        linkBg.href = data.clean_background;
+      }
+
+      btnManifest.href = data.manifest;
+
+      charResultsGrid.innerHTML = '';
+      for (const [name, url] of Object.entries(data.characters)) {
+        const card = document.createElement('div');
+        card.className = 'bg-slate-900/60 p-3 rounded-xl border border-slate-700/60 space-y-2';
+        card.innerHTML = `
+          <div class="flex items-center justify-between text-xs">
+            <span class="font-bold text-violet-300">${name}</span>
+            <a href="${url}" download class="text-violet-400 hover:underline">透過PNG保存</a>
+          </div>
+          <div class="h-36 bg-[radial-gradient(#334155_1px,transparent_1px)] [background-size:12px_12px] bg-slate-950 rounded-lg flex items-center justify-center overflow-hidden border border-slate-800">
+            <img src="${url}" class="max-h-full object-contain">
+          </div>
+        `;
+        charResultsGrid.appendChild(card);
+      }
+    }
+  </script>
+</body>
 </html>

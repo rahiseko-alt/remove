@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: video2doc-multilang
+    name: remove-manga-separation
     env: docker
     dockerfilePath: ./Dockerfile
     plan: free
@@ -8,7 +8,5 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
-      - key: APP_ENV
-        value: production
       - key: PYTHONUNBUFFERED
         value: "1"

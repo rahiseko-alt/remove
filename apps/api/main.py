@@ -1,24 +1,24 @@
 """
-Video2Doc MultiLang - FastAPI Web Application
-Provides REST API and serves Web UI for automated video-to-manual generation.
+Manga Character Separation & Transparent Export API (remove)
 """
 import os
 import uuid
 import shutil
-import asyncio
-from typing import List, Optional
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, BackgroundTasks
+import json
+from typing import List, Optional, Tuple
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from PIL import Image
 
-from scripts.run_pipeline import run_video2doc_pipeline
+from src.core.pipeline import MangaSeparationPipeline, CharacterTarget
 
 app = FastAPI(
-    title="Video2Doc MultiLang API",
+    title="Remove - Manga Character Separation & Animation Pipeline",
     version="1.0.0",
-    description="Evidence-first multilingual on-site manual generation system."
+    description="Extract characters from manga panels and export transparent layers for Cartoon Animator / AE / Spine."
 )
 
 app.add_middleware(
@@ -29,148 +29,146 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-STORAGE_DIR = os.path.abspath("storage/jobs")
-os.makedirs(STORAGE_DIR, exist_ok=True)
+STORAGE_DIR = os.path.abspath("storage")
+UPLOAD_DIR = os.path.join(STORAGE_DIR, "uploads")
+OUTPUT_DIR = os.path.join(STORAGE_DIR, "outputs")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# In-memory job tracker for lightweight status monitoring
-jobs_db = {}
-
-
-class JobStatus(BaseModel):
-    job_id: str
-    status: str  # pending, processing, completed, failed
-    progress: int  # 0 - 100
-    message: str
-    source_language: str
-    target_languages: List[str]
-    artifacts: Optional[dict] = None
-    error: Optional[str] = None
+pipeline = MangaSeparationPipeline()
 
 
-def execute_pipeline_task(
-    job_id: str,
-    video_path: str,
-    source_lang: str,
-    target_langs: List[str],
-    use_mock: bool,
-):
-    job_dir = os.path.join(STORAGE_DIR, job_id)
-    try:
-        jobs_db[job_id]["status"] = "processing"
-        jobs_db[job_id]["progress"] = 20
-        jobs_db[job_id]["message"] = "Processing video and extracting evidence..."
+class CharacterSpec(BaseModel):
+    name: str
+    box: Optional[Tuple[int, int, int, int]] = None
+    points: Optional[List[Tuple[int, int]]] = None
+    prompt: Optional[str] = None
 
-        result = run_video2doc_pipeline(
-            input_video_path=video_path,
-            output_dir=job_dir,
-            source_language=source_lang,
-            target_languages=target_langs,
-            use_mock=use_mock,
-        )
 
-        jobs_db[job_id]["status"] = "completed"
-        jobs_db[job_id]["progress"] = 100
-        jobs_db[job_id]["message"] = "Manual generated successfully!"
-        jobs_db[job_id]["artifacts"] = {
-            "master_json": f"/api/jobs/{job_id}/artifact/manual_master.json",
-            "html": f"/api/jobs/{job_id}/artifact/manual.html",
-            "markdown": f"/api/jobs/{job_id}/artifact/manual.md",
-            "pdf": f"/api/jobs/{job_id}/artifact/manual.pdf",
-            "translations": {
-                lang: f"/api/jobs/{job_id}/artifact/manual_{lang}.json"
-                for lang in target_langs
-            }
-        }
-    except Exception as e:
-        jobs_db[job_id]["status"] = "failed"
-        jobs_db[job_id]["error"] = str(e)
-        jobs_db[job_id]["message"] = f"Pipeline execution failed: {str(e)}"
+class ExtractionRequest(BaseModel):
+    image_id: str
+    characters: List[CharacterSpec]
+    generate_bg: bool = True
+    crop_characters: bool = False
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "video2doc-multilang-api"}
+    return {"status": "ok", "service": "remove-manga-separation-api"}
 
 
-@app.post("/api/jobs/create")
-async def create_job(
-    background_tasks: BackgroundTasks,
-    video: Optional[UploadFile] = File(None),
-    use_sample: bool = Form(False),
-    source_lang: str = Form("ja"),
-    target_langs: str = Form("vi,id"),
-    use_mock: bool = Form(True),
-):
-    job_id = str(uuid.uuid4())
-    job_dir = os.path.join(STORAGE_DIR, job_id)
-    os.makedirs(job_dir, exist_ok=True)
+@app.post("/api/upload")
+async def upload_image(file: UploadFile = File(...)):
+    ext = os.path.splitext(file.filename)[1] or ".png"
+    image_id = str(uuid.uuid4())
+    filename = f"{image_id}{ext}"
+    dest_path = os.path.join(UPLOAD_DIR, filename)
 
-    target_lang_list = [l.strip() for l in target_langs.split(",") if l.strip()]
+    with open(dest_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
 
-    video_path = os.path.join(job_dir, "input.mp4")
-    if use_sample or video is None:
-        sample_path = os.path.abspath("fixtures/sample/sample.mp4")
-        if not os.path.exists(sample_path):
-            from scripts.generate_sample_media import generate_sample_media
-            generate_sample_media("fixtures/sample")
-        shutil.copy(sample_path, video_path)
-    else:
-        with open(video_path, "wb") as f:
-            shutil.copyfileobj(video.file, f)
+    with Image.open(dest_path) as img:
+        width, height = img.size
 
-    jobs_db[job_id] = {
-        "job_id": job_id,
-        "status": "pending",
-        "progress": 5,
-        "message": "Job queued",
-        "source_language": source_lang,
-        "target_languages": target_lang_list,
-        "artifacts": None,
-        "error": None,
+    return {
+        "image_id": image_id,
+        "filename": filename,
+        "width": width,
+        "height": height,
+        "url": f"/storage/uploads/{filename}"
     }
 
-    background_tasks.add_task(
-        execute_pipeline_task,
-        job_id=job_id,
-        video_path=video_path,
-        source_lang=source_lang,
-        target_langs=target_lang_list,
-        use_mock=use_mock,
+
+@app.post("/api/extract")
+async def extract_characters(req: ExtractionRequest):
+    matched = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(req.image_id)]
+    if not matched:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    image_path = os.path.join(UPLOAD_DIR, matched[0])
+    job_out_dir = os.path.join(OUTPUT_DIR, req.image_id)
+
+    targets = [
+        CharacterTarget(
+            name=c.name,
+            box=c.box,
+            points=c.points,
+            prompt=c.prompt,
+        )
+        for c in req.characters
+    ]
+
+    result = pipeline.process(
+        image_path=image_path,
+        targets=targets,
+        output_dir=job_out_dir,
+        panel_id="panel_01",
+        generate_bg=req.generate_bg,
+        crop_characters=req.crop_characters,
     )
 
-    return {"job_id": job_id, "status": "queued"}
+    char_urls = {
+        name: f"/storage/outputs/{req.image_id}/{os.path.basename(path)}"
+        for name, path in result.character_paths.items()
+    }
+    bg_url = f"/storage/outputs/{req.image_id}/{os.path.basename(result.clean_plate_path)}" if result.clean_plate_path else None
+    manifest_url = f"/storage/outputs/{req.image_id}/{os.path.basename(result.manifest_path)}"
+
+    return {
+        "image_id": req.image_id,
+        "characters": char_urls,
+        "clean_background": bg_url,
+        "manifest": manifest_url,
+        "tool_compatibility": ["Cartoon Animator 5", "Adobe After Effects", "Spine 2D"]
+    }
 
 
-@app.get("/api/jobs/{job_id}", response_model=JobStatus)
-def get_job_status(job_id: str):
-    if job_id not in jobs_db:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return jobs_db[job_id]
+@app.post("/api/demo")
+async def run_demo():
+    """Instant demo with synthetic manga panel."""
+    demo_id = str(uuid.uuid4())
+    job_out_dir = os.path.join(OUTPUT_DIR, demo_id)
+    os.makedirs(job_out_dir, exist_ok=True)
+
+    demo_img_path = os.path.join(job_out_dir, "sample_panel.jpg")
+    from PIL import ImageDraw
+    img = Image.new("RGB", (800, 600), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    for x in range(0, 800, 40):
+        draw.line([(x, 0), (400, 300)], fill=(220, 220, 220), width=1)
+    draw.rectangle([60, 80, 320, 540], fill=(40, 40, 50), outline=(0, 0, 0), width=3)
+    draw.ellipse([110, 40, 270, 150], fill=(240, 240, 240), outline=(0, 0, 0), width=2)
+    draw.rectangle([460, 100, 740, 550], fill=(90, 90, 90), outline=(0, 0, 0), width=3)
+    draw.ellipse([510, 50, 690, 170], fill=(130, 130, 130), outline=(0, 0, 0), width=2)
+    img.save(demo_img_path)
+
+    targets = [
+        CharacterTarget(name="gojo", box=(60, 40, 320, 540)),
+        CharacterTarget(name="hanami", box=(460, 50, 740, 550)),
+    ]
+
+    result = pipeline.process(
+        image_path=demo_img_path,
+        targets=targets,
+        output_dir=job_out_dir,
+        panel_id="sample",
+        generate_bg=True,
+    )
+
+    return {
+        "demo_id": demo_id,
+        "sample_image": f"/storage/outputs/{demo_id}/sample_panel.jpg",
+        "characters": {
+            name: f"/storage/outputs/{demo_id}/{os.path.basename(p)}"
+            for name, p in result.character_paths.items()
+        },
+        "clean_background": f"/storage/outputs/{demo_id}/{os.path.basename(result.clean_plate_path)}",
+        "manifest": f"/storage/outputs/{demo_id}/{os.path.basename(result.manifest_path)}",
+    }
 
 
-@app.get("/api/jobs/{job_id}/artifact/{filename}")
-def get_job_artifact(job_id: str, filename: str):
-    file_path = os.path.join(STORAGE_DIR, job_id, filename)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Artifact not found")
-    
-    media_type = "application/json"
-    if filename.endswith(".html"):
-        media_type = "text/html"
-    elif filename.endswith(".pdf"):
-        media_type = "application/pdf"
-    elif filename.endswith(".md"):
-        media_type = "text/markdown"
-    elif filename.endswith(".jpg") or filename.endswith(".jpeg"):
-        media_type = "image/jpeg"
+app.mount("/storage", StaticFiles(directory=STORAGE_DIR), name="storage")
 
-    return FileResponse(file_path, media_type=media_type)
-
-
-# Mount static storage for frames
-app.mount("/storage", StaticFiles(directory="storage"), name="storage")
-
-# Mount web UI
 WEB_DIR = os.path.abspath("apps/web")
 if os.path.exists(WEB_DIR):
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

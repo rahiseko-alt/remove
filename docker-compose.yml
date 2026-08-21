@@ -1,18 +1,15 @@
 version: '3.8'
 
 services:
-  video2doc-app:
+  remove-app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: video2doc-app
+    container_name: remove-manga-separation
     ports:
       - "8000:8000"
-    environment:
-      - PYTHONUNBUFFERED=1
-      - APP_ENV=production
     volumes:
       - ./storage:/app/storage
-      - ./output:/app/output
-      - ./fixtures:/app/fixtures
+    environment:
+      - PYTHONUNBUFFERED=1
     restart: unless-stopped
