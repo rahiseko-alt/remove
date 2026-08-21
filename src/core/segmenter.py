@@ -85,42 +85,49 @@ class SAMSegmenter(BaseSegmenter):
         return self._extract_character_alpha(img_rgb)
 
     def _extract_character_alpha(self, cropped_pil: Image.Image) -> np.ndarray:
-        """Extract high-precision alpha mask from character region."""
-        # Try Rembg AI model first
-        try:
-            import rembg
-            nobg_pil = rembg.remove(cropped_pil)
-            alpha = np.array(nobg_pil.split()[-1])
-            # Threshold alpha to solid 0/255 mask
-            mask = np.where(alpha > 15, 255, 0).astype(np.uint8)
-            return mask
-        except Exception:
-            pass
-
-        # Smart Line-art & GrabCut Manga Fallback
-        img_np = np.array(cropped_pil)
+        """
+        High-speed, memory-efficient manga alpha extractor.
+        Preserves character internal lines/whites while making external background completely transparent.
+        """
+        img_np = np.array(cropped_pil.convert("RGB"))
         h, w = img_np.shape[:2]
+        if h <= 0 or w <= 0:
+            return np.zeros((max(1, h), max(1, w)), dtype=np.uint8)
+
         gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
 
-        # Auto threshold for manga line art & tones (remove pure white page background)
-        _, thresh = cv2.threshold(gray, 240, 255, cv2.THRESH_BINARY_INV)
+        # 1. Identify pure background by flood-filling from border corners directly on gray image
+        # cv2.floodFill requires mask size to be (h + 2, w + 2)
+        ff_mask = np.zeros((h + 2, w + 2), dtype=np.uint8)
+        corners = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]
+        for cx, cy in corners:
+            if gray[cy, cx] > 180:
+                cv2.floodFill(
+                    gray.copy(),
+                    ff_mask,
+                    (cx, cy),
+                    newVal=0,
+                    loDiff=20,
+                    upDiff=20,
+                    flags=4 | (255 << 8) | cv2.FLOODFILL_MASK_ONLY
+                )
 
-        # Morphological closing to solidate character body
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=2)
+        # Extract actual image area from floodfill mask (slice inner h x w)
+        external_bg = ff_mask[1:h+1, 1:w+1]
 
-        # Find largest contours (main character body)
-        contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        mask = np.zeros((h, w), dtype=np.uint8)
-        if contours:
-            cv2.drawContours(mask, contours, -1, 255, -1)
-            # Combine with line details
-            mask = np.bitwise_and(mask, closed)
-            mask = np.where(closed > 0, 255, 0).astype(np.uint8)
-        else:
-            mask = closed
+        # 2. Foreground mask: Everything that is NOT external background
+        fg_mask = np.where(external_bg == 0, 255, 0).astype(np.uint8)
 
-        return mask
+        # 3. Refine edges: remove remaining near-white background noise around borders
+        is_bright = (gray > 240)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        dilated_bg = cv2.dilate(external_bg, kernel, iterations=2)
+        fg_mask = np.where((dilated_bg > 0) & is_bright, 0, fg_mask).astype(np.uint8)
+
+        # 4. Morphological smoothing
+        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+        return fg_mask
 
 
 def create_transparent_png(

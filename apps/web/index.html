@@ -296,6 +296,8 @@
         return;
       }
       try {
+        btnExtract.disabled = true;
+        btnExtract.innerHTML = '<i class="fa-solid fa-spinner animate-spin"></i> 抽出中...';
         const res = await fetch('/api/extract', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -305,22 +307,35 @@
             generate_bg: true
           })
         });
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Server Error (${res.status}): ${errText}`);
+        }
         const data = await res.json();
         showResults(data);
       } catch (err) {
         alert('抽出失敗: ' + err.message);
+      } finally {
+        btnExtract.disabled = false;
+        btnExtract.innerHTML = '<i class="fa-solid fa-scissors"></i> 個別キャラクター切り抜き ＆ 透過素材化を実行';
       }
     });
 
     btnDemo.addEventListener('click', async () => {
       try {
+        btnDemo.disabled = true;
         btnDemo.innerHTML = '<i class="fa-solid fa-spinner animate-spin"></i> 生成中...';
         const res = await fetch('/api/demo', { method: 'POST' });
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Server Error (${res.status}): ${errText}`);
+        }
         const data = await res.json();
         showResults(data);
-        btnDemo.innerHTML = '<i class="fa-solid fa-bolt"></i> 五条 & 花御 サンプルで即試す';
       } catch (err) {
         alert('デモ失敗: ' + err.message);
+      } finally {
+        btnDemo.disabled = false;
         btnDemo.innerHTML = '<i class="fa-solid fa-bolt"></i> 五条 & 花御 サンプルで即試す';
       }
     });
